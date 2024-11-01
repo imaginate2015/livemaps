@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Feed Map with Traffic Layer</title>
+
+    <!-- Mapbox CSS -->
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
+
+    <!-- Firebase SDK v9 with compatibility mode -->
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+
+    <!-- Pulsating circle and orientation arrow styles -->
+    <style>
+        #map {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            position: relative; /* Ensure it doesn't cover fixed elements */
+        }
+
+        .pulse-marker {
+            position: relative;
+            width: 20px;
+            height: 20px;
+            background-color: rgba(128, 0, 128, 0.5);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .pulse-marker::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background-color: rgba(128, 0, 128, 0.5);
+            animation: pulse-animation 2s infinite;
+        }
+
+        @keyframes pulse-animation {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+
+        /* Pulsating marker with orientation arrow */
+        .pulse-marker::after {
+            content: '';
+            position: absolute;
+            top: -12px; /* Adjust the arrow position */
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 10px solid rgba(128, 0, 128, 0.8); /* Arrow color */
+            transform: translateX(-50%) rotate(0deg); /* Center and rotate the arrow based on heading */
+        }
+
+        /* Follow toggle control styling */
+        #controls {
+            position: fixed;  /* Ensures it stays on top */
+            top: 10px;
+            left: 10px;
+            z-index: 10;  /* Higher than the map */
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <!-- Follow Control Toggle -->
+    <div id="controls">
+        <label>
+            <input type="checkbox" id="followToggle" checked>
+            Follow User Location
+        </label>
+    </div>
+
+    <!-- Mapbox JS -->
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
+
+    <!-- Import custom JavaScript files as modules -->
+    <script type="module" src="./js/firebaseConfig.js"></script>
+    <script type="module" src="./js/mapboxConfig.js"></script>
+    <script type="module" src="./js/Firebaselisteners.js"></script>
+    <script type="module" src="./js/geolocation.js"></script>
+    <script type="module" src="./js/telegram.js"></script>
+
+    <script type="module">
+        import { firebaseConfig } from './js/firebaseConfig.js';
+        import { initializeMapbox } from './js/mapboxConfig.js';
+        import { initializeFirebaseListeners } from './js/Firebaselisteners.js';
+        import { initializeGeolocation } from './js/geolocation.js';
+        import { fetchTelegramUpdates } from './js/telegram.js';
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+
+        // Initialize Mapbox map
+        const map = initializeMapbox();
+
+        // Initialize Firebase listeners for adding/removing markers
+        initializeFirebaseListeners(map);
+
+        // Track follow status based on checkbox
+        let followUserLocation = true;
+        const followToggle = document.getElementById("followToggle");
+
+        // Listen to checkbox toggle to enable/disable following the user's location
+        followToggle.addEventListener("change", (event) => {
+            followUserLocation = event.target.checked;
+        });
+
+        // User location marker
+        let userMarker;
+
+        // Function to update the user’s location and optionally follow it on the map
+        function updateUserLocation(position) {
+            const { latitude, longitude } = position.coords;
+
+            // Update or create the user marker on the map
+            if (userMarker) {
+                userMarker.setLngLat([longitude, latitude]);
+            } else {
+                userMarker = new mapboxgl.Marker({ color: "purple" })
+                    .setLngLat([longitude, latitude])
+                    .addTo(map);
+            }
+
+            // If follow mode is enabled, center the map on the user's location
+            if (followUserLocation) {
+                map.flyTo({
+                    center: [longitude, latitude],
+                    essential: true
+                });
+            }
+        }
+
+        // Initialize geolocation to show user location and update it
+        function initializeGeolocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.watchPosition(updateUserLocation, console.error, {
+                    enableHighAccuracy: true,
+                    maximumAge: 30000,
+                    timeout: 27000
+                });
+            } else {
+                console.error("Geolocation is not supported by this browser.");
+            }
+        }
+
+        // Start tracking the user's location
+        initializeGeolocation();
+
+        // Fetch real-time Telegram updates and send coordinates to the map
+        fetchTelegramUpdates(map);
+
+        // Function to sync RSS feed
+        function syncRssFeed() {
+            fetch('https://syncrsstofirebase-127316555418.us-central1.run.app')
+                .then(response => response.json())
+                .then(data => console.log('RSS feed synced successfully:', data))
+                .catch(error => console.error('Error syncing RSS feed:', error));
+        }
+
+        // Sync RSS feed on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            syncRssFeed();
+        });
+
+        // Refresh RSS feed based on any user activity
+        let activityTimeout;
+        function resetActivityTimeout() {
+            clearTimeout(activityTimeout);
+            activityTimeout = setTimeout(() => {
+                syncRssFeed();
+            }, 300000); // Sync RSS feed every 5 minutes of inactivity
+        }
+
+        // Add event listeners for both mouse and touch events for activity detection
+        window.addEventListener('mousemove', resetActivityTimeout);
+
+        // Touch events to detect activity on mobile devices
+        window.addEventListener('touchstart', resetActivityTimeout);
+        window.addEventListener('touchmove', resetActivityTimeout);
+        window.addEventListener('gesturechange', resetActivityTimeout);  // Detect zoom gestures
+        window.addEventListener('gestureend', resetActivityTimeout);
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+specVersion: "v1beta"
+serviceId: "mapp-app-live-feed"
+location: "asia-east1"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "postgres"
+      cloudSql:
+        instanceId: "map-app-fddc"
+      # schemaValidation: "COMPATIBLE"
+connectorDirs: ["./connector"]
